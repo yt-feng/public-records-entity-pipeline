@@ -13,12 +13,22 @@ ROOT = Path(__file__).parent
 OUTPUT = ROOT / "data/structured_candidate_records.json"
 AS_OF = "2026-09-20"
 FAMILY_PATTERNS = [
-    "saud|rashid",
+    "saud",
+    "rashid",
     "thani",
     "sabah",
     "khalifa",
-    "nahyan|maktoum|qasimi|nuaimi|sharqi|mualla|falasi|said",
-    "hashemite|alaoui|alawi",
+    "nahyan",
+    "maktoum",
+    "qasimi",
+    "nuaimi",
+    "sharqi",
+    "mualla",
+    "falasi",
+    "said",
+    "hashemite",
+    "alaoui",
+    "alawi",
 ]
 
 
@@ -49,6 +59,8 @@ def classify(label: str) -> tuple[str, str]:
 
 def main() -> None:
     bindings = []
+    successful_patterns = []
+    failed_patterns = []
     for pattern in FAMILY_PATTERNS:
         query = f'''SELECT DISTINCT ?person ?personLabel ?family ?familyLabel WHERE {{
           ?person wdt:P31 wd:Q5 ; wdt:P53 ?family .
@@ -56,7 +68,7 @@ def main() -> None:
           FILTER(LANG(?familyLabel)="en")
           FILTER(REGEX(LCASE(STR(?familyLabel)), "{pattern}"))
           SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en". }}
-        }} LIMIT 20000'''
+        }} LIMIT 5000'''
         last_error = "empty response"
         for attempt in range(4):
             try:
@@ -75,12 +87,15 @@ def main() -> None:
                     raise ValueError("empty response")
                 batch = json.loads(payload)["results"]["bindings"]
                 bindings.extend(batch)
+                successful_patterns.append(pattern)
                 print(f"family_pattern={pattern} attempt={attempt + 1} bindings={len(batch)}", flush=True)
                 break
             except (subprocess.CalledProcessError, ValueError, json.JSONDecodeError) as exc:
                 last_error = str(exc)
                 if attempt == 3:
-                    raise RuntimeError(f"family pattern failed: {pattern}: {last_error}") from exc
+                    failed_patterns.append(pattern)
+                    print(f"family_pattern={pattern} skipped after retries: {last_error}", flush=True)
+                    break
                 time.sleep(5 * (attempt + 1))
     records = []
     seen = set()
@@ -113,8 +128,10 @@ def main() -> None:
             "source_id": "SRC-069",
             "as_of": AS_OF,
         })
-    OUTPUT.write_text(json.dumps({"records": records, "as_of": AS_OF, "family_patterns": FAMILY_PATTERNS}, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(json.dumps({"bindings": len(bindings), "records": len(records), "output": str(OUTPUT)}, ensure_ascii=False))
+    OUTPUT.write_text(json.dumps({"records": records, "as_of": AS_OF, "family_patterns": FAMILY_PATTERNS, "successful_patterns": successful_patterns, "failed_patterns": failed_patterns}, ensure_ascii=False, indent=2), encoding="utf-8")
+    if not successful_patterns:
+        raise RuntimeError("all structured candidate patterns failed")
+    print(json.dumps({"bindings": len(bindings), "records": len(records), "successful_patterns": successful_patterns, "failed_patterns": failed_patterns, "output": str(OUTPUT)}, ensure_ascii=False))
 
 
 if __name__ == "__main__":
