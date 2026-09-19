@@ -19,6 +19,11 @@ ROOT = Path(__file__).parent
 OUTPUT = ROOT / "data/structured_candidate_records.json"
 AS_OF = "2026-09-20"
 SOURCE_ID = "SRC-070"
+FAMILY_NAME_PATTERNS = [
+    "saud", "rashid", "thani", "sabah", "khalifa", "nahyan", "maktoum",
+    "qasimi", "nuaimi", "sharqi", "mualla", "falasi", "said", "hashemite",
+    "alaoui", "alawi",
+]
 
 COUNTRY_BATCHES = {
     "gcc": {
@@ -168,6 +173,34 @@ def make_title_record(row: dict, country_fallback: str) -> dict | None:
     }
 
 
+def make_family_name_record(row: dict, country_fallback: str) -> dict | None:
+    person_qid = value(row, "person").rsplit("/", 1)[-1]
+    name = value(row, "personLabel")
+    country = classify_country(value(row, "countryLabel"), country_fallback)
+    family_name_qid = value(row, "familyName").rsplit("/", 1)[-1]
+    family_name = value(row, "familyNameLabel")
+    if not person_qid or not name or name.startswith("Q") or not family_name_qid or not family_name:
+        return None
+    key = (person_qid, country, family_name_qid)
+    record_id = "WDRY-" + hashlib.sha1("|".join(key).encode("utf-8")).hexdigest()[:16].upper()
+    return {
+        "record_id": record_id,
+        "country_section": country,
+        "house": f"Family-name signal: {family_name}",
+        "page_url": f"https://www.wikidata.org/wiki/{person_qid}",
+        "name": name,
+        "family_qid": family_name_qid,
+        "source_text_short": f"Public structured data gives {name} family-name signal {family_name}; country signal={country}.",
+        "record_status": "public structured MENA family-name candidate; family membership and royal status require independent review",
+        "evidence_level": "低/结构化候选",
+        "intro": f"Wikidata records {name} with family-name signal {family_name}; country signal={country}. This is not proof of dynasty membership.",
+        "relationship": f"Structured family-name signal: {name} -> {family_name}; country signal={country}.",
+        "relation_type": "候选/family-name signal/MENA扩展",
+        "source_id": SOURCE_ID,
+        "as_of": AS_OF,
+    }
+
+
 def main() -> None:
     records_by_id: dict[str, dict] = {}
     if OUTPUT.exists():
@@ -198,10 +231,20 @@ def main() -> None:
           FILTER(REGEX(LCASE(STR(?titleLabel)), "prince|princess|emir|emira|sheikh|sheikha|sultan|king|queen|sharif|caliph|sayyid|sayyida"))
           SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en". }}
         }} LIMIT 50000'''
+        family_name_pattern = "|".join(FAMILY_NAME_PATTERNS)
+        family_name_query = f'''SELECT DISTINCT ?person ?personLabel ?country ?countryLabel ?familyName ?familyNameLabel WHERE {{
+          VALUES ?country {{ {country_values} }}
+          ?person wdt:P31 wd:Q5 ; wdt:P27 ?country ; wdt:P734 ?familyName .
+          ?familyName rdfs:label ?familyNameLabel .
+          FILTER(LANG(?familyNameLabel)="en")
+          FILTER(REGEX(LCASE(STR(?familyNameLabel)), "{family_name_pattern}"))
+          SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en". }}
+        }} LIMIT 50000'''
         try:
             family_rows = run_query(family_query)
             royalty_rows = run_query(royalty_query)
             title_rows = run_query(title_query)
+            family_name_rows = run_query(family_name_query)
             added = 0
             for row in family_rows:
                 record = make_family_record(row, batch_name)
@@ -218,8 +261,13 @@ def main() -> None:
                 if record and record["record_id"] not in records_by_id:
                     records_by_id[record["record_id"]] = record
                     added += 1
+            for row in family_name_rows:
+                record = make_family_name_record(row, batch_name)
+                if record and record["record_id"] not in records_by_id:
+                    records_by_id[record["record_id"]] = record
+                    added += 1
             successful.append(batch_name)
-            print(f"batch={batch_name} family_bindings={len(family_rows)} royalty_bindings={len(royalty_rows)} title_bindings={len(title_rows)} new_records={added}", flush=True)
+            print(f"batch={batch_name} family_bindings={len(family_rows)} royalty_bindings={len(royalty_rows)} title_bindings={len(title_rows)} family_name_bindings={len(family_name_rows)} new_records={added}", flush=True)
         except RuntimeError as exc:
             failed.append(batch_name)
             print(f"batch={batch_name} skipped after retries: {exc}", flush=True)
