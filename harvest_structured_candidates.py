@@ -5,13 +5,21 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+import time
 from pathlib import Path
 
 
 ROOT = Path(__file__).parent
 OUTPUT = ROOT / "data/structured_candidate_records.json"
 AS_OF = "2026-09-20"
-FAMILY_REGEX = "saud|thani|sabah|khalifa|nahyan|maktoum|qasimi|nuaimi|sharqi|mualla|falasi|said|rashid|alawi|alaoui|hashemite|royal house|dynasty"
+FAMILY_PATTERNS = [
+    "saud|rashid",
+    "thani",
+    "sabah",
+    "khalifa",
+    "nahyan|maktoum|qasimi|nuaimi|sharqi|mualla|falasi|said",
+    "hashemite|alaoui|alawi",
+]
 
 
 def value(row: dict, key: str) -> str:
@@ -40,24 +48,40 @@ def classify(label: str) -> tuple[str, str]:
 
 
 def main() -> None:
-    query = f'''SELECT DISTINCT ?person ?personLabel ?family ?familyLabel WHERE {{
-      ?person wdt:P31 wd:Q5 ; wdt:P53 ?family .
-      ?family rdfs:label ?familyLabel .
-      FILTER(LANG(?familyLabel)="en")
-      FILTER(REGEX(LCASE(STR(?familyLabel)), "{FAMILY_REGEX}"))
-      SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en". }}
-    }} LIMIT 20000'''
-    result = subprocess.run(
-        [
-            "curl", "-L", "--max-time", "240", "--connect-timeout", "15", "-sS", "-G",
-            "https://query.wikidata.org/sparql", "--data-urlencode", f"query={query}",
-            "--data-urlencode", "format=json", "-A", "Public-Records-Research/0.2",
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    bindings = json.loads(result.stdout)["results"]["bindings"]
+    bindings = []
+    for pattern in FAMILY_PATTERNS:
+        query = f'''SELECT DISTINCT ?person ?personLabel ?family ?familyLabel WHERE {{
+          ?person wdt:P31 wd:Q5 ; wdt:P53 ?family .
+          ?family rdfs:label ?familyLabel .
+          FILTER(LANG(?familyLabel)="en")
+          FILTER(REGEX(LCASE(STR(?familyLabel)), "{pattern}"))
+          SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en". }}
+        }} LIMIT 20000'''
+        last_error = "empty response"
+        for attempt in range(4):
+            try:
+                result = subprocess.run(
+                    [
+                        "curl", "-L", "--fail-with-body", "--max-time", "120", "--connect-timeout", "15", "-sS", "-G",
+                        "https://query.wikidata.org/sparql", "--data-urlencode", f"query={query}",
+                        "--data-urlencode", "format=json", "-A", "Public-Records-Research/0.2",
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                payload = result.stdout.strip()
+                if not payload:
+                    raise ValueError("empty response")
+                batch = json.loads(payload)["results"]["bindings"]
+                bindings.extend(batch)
+                print(f"family_pattern={pattern} attempt={attempt + 1} bindings={len(batch)}", flush=True)
+                break
+            except (subprocess.CalledProcessError, ValueError, json.JSONDecodeError) as exc:
+                last_error = str(exc)
+                if attempt == 3:
+                    raise RuntimeError(f"family pattern failed: {pattern}: {last_error}") from exc
+                time.sleep(5 * (attempt + 1))
     records = []
     seen = set()
     for row in bindings:
@@ -89,7 +113,7 @@ def main() -> None:
             "source_id": "SRC-069",
             "as_of": AS_OF,
         })
-    OUTPUT.write_text(json.dumps({"records": records, "as_of": AS_OF, "family_regex": FAMILY_REGEX}, ensure_ascii=False, indent=2), encoding="utf-8")
+    OUTPUT.write_text(json.dumps({"records": records, "as_of": AS_OF, "family_patterns": FAMILY_PATTERNS}, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({"bindings": len(bindings), "records": len(records), "output": str(OUTPUT)}, ensure_ascii=False))
 
 
