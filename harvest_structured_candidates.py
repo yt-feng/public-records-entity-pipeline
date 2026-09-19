@@ -171,10 +171,16 @@ def main() -> None:
             "source_id": "SRC-069",
             "as_of": AS_OF,
         })
-    OUTPUT.write_text(json.dumps({"records": records, "as_of": AS_OF, "family_patterns": FAMILY_PATTERNS, "successful_patterns": successful_patterns, "failed_patterns": failed_patterns}, ensure_ascii=False, indent=2), encoding="utf-8")
+    # Preserve candidate records from other structured layers.  This script is
+    # intentionally rerunnable, but it must not erase the royalty/title layer
+    # before the append step consumes it.
+    previous = json.loads(OUTPUT.read_text(encoding="utf-8")).get("records", []) if OUTPUT.exists() else []
+    preserved = [record for record in previous if not str(record.get("record_id", "")).startswith("WDSC-")]
+    merged = preserved + records
+    OUTPUT.write_text(json.dumps({"records": merged, "as_of": AS_OF, "family_patterns": FAMILY_PATTERNS, "successful_patterns": successful_patterns, "failed_patterns": failed_patterns}, ensure_ascii=False, indent=2), encoding="utf-8")
     if not successful_patterns:
         raise RuntimeError("all structured candidate patterns failed")
-    print(json.dumps({"bindings": len(bindings), "records": len(records), "successful_patterns": successful_patterns, "failed_patterns": failed_patterns, "output": str(OUTPUT)}, ensure_ascii=False))
+    print(json.dumps({"bindings": len(bindings), "records": len(merged), "new_pattern_records": len(records), "successful_patterns": successful_patterns, "failed_patterns": failed_patterns, "output": str(OUTPUT)}, ensure_ascii=False))
 
 
 if __name__ == "__main__":

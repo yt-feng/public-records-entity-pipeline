@@ -140,6 +140,34 @@ def make_royalty_record(row: dict, country_fallback: str) -> dict | None:
     }
 
 
+def make_title_record(row: dict, country_fallback: str) -> dict | None:
+    person_qid = value(row, "person").rsplit("/", 1)[-1]
+    name = value(row, "personLabel")
+    country = classify_country(value(row, "countryLabel"), country_fallback)
+    title_qid = value(row, "title").rsplit("/", 1)[-1]
+    title = value(row, "titleLabel")
+    if not person_qid or not name or name.startswith("Q") or not title_qid or not title:
+        return None
+    key = (person_qid, country, title_qid)
+    record_id = "WDRY-" + hashlib.sha1("|".join(key).encode("utf-8")).hexdigest()[:16].upper()
+    return {
+        "record_id": record_id,
+        "country_section": country,
+        "house": f"Noble/princely title: {title}",
+        "page_url": f"https://www.wikidata.org/wiki/{person_qid}",
+        "name": name,
+        "family_qid": "",
+        "source_text_short": f"Public structured data gives {name} the noble/princely title {title}; country signal={country}.",
+        "record_status": "public structured MENA title candidate; title and family identity require independent review",
+        "evidence_level": "低/结构化候选",
+        "intro": f"Wikidata records {name} with title {title}; country signal={country}. This does not assert current status or family branch.",
+        "relationship": f"Structured title signal: {name} -> {title}; country signal={country}.",
+        "relation_type": "候选/noble-princely title/MENA扩展",
+        "source_id": SOURCE_ID,
+        "as_of": AS_OF,
+    }
+
+
 def main() -> None:
     records_by_id: dict[str, dict] = {}
     if OUTPUT.exists():
@@ -162,9 +190,18 @@ def main() -> None:
           ?person wdt:P31 wd:Q5 ; wdt:P27 ?country ; wdt:P106/wdt:P279* wd:Q11573099 .
           SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en". }}
         }} LIMIT 50000'''
+        title_query = f'''SELECT DISTINCT ?person ?personLabel ?country ?countryLabel ?title ?titleLabel WHERE {{
+          VALUES ?country {{ {country_values} }}
+          ?person wdt:P31 wd:Q5 ; wdt:P27 ?country ; wdt:P97 ?title .
+          ?title rdfs:label ?titleLabel .
+          FILTER(LANG(?titleLabel)="en")
+          FILTER(REGEX(LCASE(STR(?titleLabel)), "prince|princess|emir|emira|sheikh|sheikha|sultan|king|queen|sharif|caliph|sayyid|sayyida"))
+          SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en". }}
+        }} LIMIT 50000'''
         try:
             family_rows = run_query(family_query)
             royalty_rows = run_query(royalty_query)
+            title_rows = run_query(title_query)
             added = 0
             for row in family_rows:
                 record = make_family_record(row, batch_name)
@@ -176,8 +213,13 @@ def main() -> None:
                 if record and record["record_id"] not in records_by_id:
                     records_by_id[record["record_id"]] = record
                     added += 1
+            for row in title_rows:
+                record = make_title_record(row, batch_name)
+                if record and record["record_id"] not in records_by_id:
+                    records_by_id[record["record_id"]] = record
+                    added += 1
             successful.append(batch_name)
-            print(f"batch={batch_name} family_bindings={len(family_rows)} royalty_bindings={len(royalty_rows)} new_records={added}", flush=True)
+            print(f"batch={batch_name} family_bindings={len(family_rows)} royalty_bindings={len(royalty_rows)} title_bindings={len(title_rows)} new_records={added}", flush=True)
         except RuntimeError as exc:
             failed.append(batch_name)
             print(f"batch={batch_name} skipped after retries: {exc}", flush=True)
