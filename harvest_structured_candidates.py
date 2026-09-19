@@ -113,7 +113,7 @@ def main() -> None:
 
     # Exact family-label fallback for the two major Qatar/UAE houses whose
     # broad regex queries are intermittently slow at the public endpoint.
-    labels = ", ".join(json.dumps(label) + "@en" for label in EXACT_FAMILY_LABELS)
+    labels = " ".join(json.dumps(label) + "@en" for label in EXACT_FAMILY_LABELS)
     family_query = f'''SELECT DISTINCT ?family ?familyLabel WHERE {{
       VALUES ?wanted {{ {labels} }}
       ?family rdfs:label ?wanted .
