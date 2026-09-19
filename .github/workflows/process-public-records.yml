@@ -8,6 +8,16 @@ on:
         required: true
         default: false
         type: boolean
+      source_offset:
+        description: "Zero-based source QID offset for a resumable relation batch"
+        required: true
+        default: "0"
+        type: string
+      source_limit:
+        description: "Maximum source QIDs in this batch; 300 keeps API work bounded"
+        required: true
+        default: "300"
+        type: string
 
 permissions:
   contents: write
@@ -31,7 +41,11 @@ jobs:
 
       - name: Expand public relationship edges
         if: ${{ inputs.expand_relations == true }}
+        env:
+          RELATION_SOURCE_OFFSET: ${{ inputs.source_offset }}
+          RELATION_SOURCE_LIMIT: ${{ inputs.source_limit }}
         run: |
+          echo "Processing source offset ${RELATION_SOURCE_OFFSET} with limit ${RELATION_SOURCE_LIMIT}"
           python extract_relation_wave.py
           python append_relation_wave.py
 

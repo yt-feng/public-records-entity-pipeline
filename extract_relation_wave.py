@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import time
 from pathlib import Path
@@ -38,11 +39,15 @@ def main() -> None:
         match = re.search(r"wikidata\.org/(?:wiki/|entity/)(Q\d+)", str(row[14] or ""))
         if match:
             contexts.setdefault(match.group(1), set()).add((row[1], row[2]))
-    source_qids = sorted(contexts)
+    all_source_qids = sorted(contexts)
+    source_offset = max(int(os.getenv("RELATION_SOURCE_OFFSET", "0")), 0)
+    source_limit = max(int(os.getenv("RELATION_SOURCE_LIMIT", "300")), 0)
+    source_qids = all_source_qids[source_offset:source_offset + source_limit if source_limit else None]
 
     previous: list[dict] = []
     for path in sorted(ROOT.glob("data/network_edge*_records.json")):
         previous.extend(load_records(path))
+    previous.extend(load_records(OUTPUT))
     previous_keys = {
         (record["member_qid"], record["related_qid"], record["edge"], record["country_section"], record["house"])
         for record in previous
@@ -131,7 +136,7 @@ def main() -> None:
         merged_ids.add(record.get("record_id"))
         merged_records.append(record)
     OUTPUT.write_text(
-        json.dumps({"records": merged_records, "source_qids": source_qids, "target_qids": target_qids}, ensure_ascii=False, indent=2),
+        json.dumps({"records": merged_records, "source_qids": source_qids, "all_source_qids": all_source_qids, "source_offset": source_offset, "source_limit": source_limit, "target_qids": target_qids}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     for path in [CHECKPOINT, target_checkpoint]:
