@@ -30,6 +30,12 @@ FAMILY_PATTERNS = [
     "alaoui",
     "alawi",
 ]
+EXACT_FAMILY_LABELS = [
+    "House of Thani",
+    "Al Thani",
+    "House of Nahyan",
+    "Al Nahyan",
+]
 
 
 def value(row: dict, key: str) -> str:
@@ -57,6 +63,33 @@ def classify(label: str) -> tuple[str, str]:
     return "MENA / historical scope", label
 
 
+def run_query(query: str) -> list[dict]:
+    """Run one bounded Wikidata query with retries on transient responses."""
+    last_error = "empty response"
+    for attempt in range(4):
+        try:
+            result = subprocess.run(
+                [
+                    "curl", "-L", "--fail-with-body", "--max-time", "120", "--connect-timeout", "15", "-sS", "-G",
+                    "https://query.wikidata.org/sparql", "--data-urlencode", f"query={query}",
+                    "--data-urlencode", "format=json", "-A", "Public-Records-Research/0.2",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            payload = result.stdout.strip()
+            if not payload:
+                raise ValueError("empty response")
+            return json.loads(payload)["results"]["bindings"]
+        except (subprocess.CalledProcessError, ValueError, json.JSONDecodeError) as exc:
+            last_error = str(exc)
+            if attempt == 3:
+                raise RuntimeError(last_error) from exc
+            time.sleep(5 * (attempt + 1))
+    raise RuntimeError(last_error)
+
+
 def main() -> None:
     bindings = []
     successful_patterns = []
@@ -69,34 +102,44 @@ def main() -> None:
           FILTER(REGEX(LCASE(STR(?familyLabel)), "{pattern}"))
           SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en". }}
         }} LIMIT 5000'''
-        last_error = "empty response"
-        for attempt in range(4):
-            try:
-                result = subprocess.run(
-                    [
-                        "curl", "-L", "--fail-with-body", "--max-time", "120", "--connect-timeout", "15", "-sS", "-G",
-                        "https://query.wikidata.org/sparql", "--data-urlencode", f"query={query}",
-                        "--data-urlencode", "format=json", "-A", "Public-Records-Research/0.2",
-                    ],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                )
-                payload = result.stdout.strip()
-                if not payload:
-                    raise ValueError("empty response")
-                batch = json.loads(payload)["results"]["bindings"]
-                bindings.extend(batch)
-                successful_patterns.append(pattern)
-                print(f"family_pattern={pattern} attempt={attempt + 1} bindings={len(batch)}", flush=True)
-                break
-            except (subprocess.CalledProcessError, ValueError, json.JSONDecodeError) as exc:
-                last_error = str(exc)
-                if attempt == 3:
-                    failed_patterns.append(pattern)
-                    print(f"family_pattern={pattern} skipped after retries: {last_error}", flush=True)
-                    break
-                time.sleep(5 * (attempt + 1))
+        try:
+            batch = run_query(query)
+            bindings.extend(batch)
+            successful_patterns.append(pattern)
+            print(f"family_pattern={pattern} bindings={len(batch)}", flush=True)
+        except RuntimeError as exc:
+            failed_patterns.append(pattern)
+            print(f"family_pattern={pattern} skipped after retries: {exc}", flush=True)
+
+    # Exact family-label fallback for the two major Qatar/UAE houses whose
+    # broad regex queries are intermittently slow at the public endpoint.
+    labels = ", ".join(json.dumps(label) + "@en" for label in EXACT_FAMILY_LABELS)
+    family_query = f'''SELECT DISTINCT ?family ?familyLabel WHERE {{
+      VALUES ?wanted {{ {labels} }}
+      ?family rdfs:label ?wanted .
+      BIND(?wanted AS ?familyLabel)
+    }}'''
+    try:
+        family_rows = run_query(family_query)
+        family_qids = sorted({value(row, "family").rsplit("/", 1)[-1] for row in family_rows if value(row, "family")})
+        print(f"exact_family_labels qids={family_qids}", flush=True)
+    except RuntimeError as exc:
+        family_qids = []
+        print(f"exact_family_labels skipped after retries: {exc}", flush=True)
+    for family_qid in family_qids:
+        query = f'''SELECT DISTINCT ?person ?personLabel ?family ?familyLabel WHERE {{
+          ?person wdt:P31 wd:Q5 ; wdt:P53 wd:{family_qid} .
+          BIND(wd:{family_qid} AS ?family)
+          ?family rdfs:label ?familyLabel .
+          FILTER(LANG(?familyLabel)="en")
+          SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en". }}
+        }} LIMIT 5000'''
+        try:
+            batch = run_query(query)
+            bindings.extend(batch)
+            print(f"family_qid={family_qid} bindings={len(batch)}", flush=True)
+        except RuntimeError as exc:
+            print(f"family_qid={family_qid} skipped after retries: {exc}", flush=True)
     records = []
     seen = set()
     for row in bindings:
