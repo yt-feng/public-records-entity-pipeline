@@ -58,6 +58,7 @@ jobs:
         if: ${{ inputs.harvest_candidates == true }}
         run: |
           python harvest_structured_candidates.py
+          python harvest_royalty_candidates.py
           python append_structured_candidates.py
 
       - name: Rebuild unique layers
