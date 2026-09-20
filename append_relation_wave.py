@@ -8,10 +8,11 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
+from relation_state import load_relation_state
+
 
 ROOT = Path(__file__).parent
 WORKBOOK = ROOT / "inputs/entity_network_master.xlsx"
-INPUT = ROOT / "data/relation_wave_records.json"
 SOURCE_ID = "SRC-068"
 GCC = {"Saudi Arabia", "Qatar", "United Arab Emirates", "Kuwait", "Bahrain", "Oman"}
 
@@ -28,7 +29,7 @@ def style(ws, source: int, target: int) -> None:
 
 
 def main() -> None:
-    records = json.loads(INPUT.read_text(encoding="utf-8"))["records"]
+    records = load_relation_state().get("records", [])
     wb = load_workbook(WORKBOOK)
     people, relationships = wb["People"], wb["Relationships"]
     sources, attachment = wb["Sources"], wb["Attachment_Readout"]

@@ -13,11 +13,11 @@ from pathlib import Path
 from openpyxl import load_workbook
 
 import extract_relation_wave_base as base
+from relation_state import OUTPUT as COMPRESSED_OUTPUT, load_relation_state, write_relation_state
 
 
 ROOT = Path(__file__).parent
 WORKBOOK = ROOT / "inputs/entity_network_master.xlsx"
-OUTPUT = ROOT / "data/relation_wave_records.json"
 CHECKPOINT = ROOT / "data/relation_wave_checkpoint.json"
 FAST_INDEX = ROOT / "data/fast_entity_index.json"
 GCC = {"Saudi Arabia", "Qatar", "United Arab Emirates", "Kuwait", "Bahrain", "Oman"}
@@ -117,7 +117,8 @@ def main() -> None:
     previous: list[dict] = []
     for path in sorted(ROOT.glob("data/network_edge*_records.json")):
         previous.extend(load_records(path))
-    previous.extend(load_records(OUTPUT))
+    relation_state = load_relation_state()
+    previous.extend(relation_state.get("records", []))
     previous_keys = {
         (record["member_qid"], record["related_qid"], record["edge"], record["country_section"], record["house"])
         for record in previous
@@ -173,7 +174,7 @@ def main() -> None:
     # Keep this file append-only across GitHub Actions runs.  The extractor emits
     # only keys not present in earlier waves, so replacing the file here would
     # discard records produced by a previous runner invocation.
-    existing_records = load_records(OUTPUT)
+    existing_records = relation_state.get("records", [])
     merged_records = []
     merged_ids = set()
     for record in existing_records + records:
@@ -181,14 +182,20 @@ def main() -> None:
             continue
         merged_ids.add(record.get("record_id"))
         merged_records.append(record)
-    OUTPUT.write_text(
-        json.dumps({"records": merged_records, "source_qids": source_qids, "all_source_qids": all_source_qids, "source_offset": source_offset, "source_limit": source_limit, "target_qids": target_qids}, ensure_ascii=False, indent=2),
-        encoding="utf-8",
+    write_relation_state(
+        {
+            "records": merged_records,
+            "source_qids": source_qids,
+            "all_source_qids": all_source_qids,
+            "source_offset": source_offset,
+            "source_limit": source_limit,
+            "target_qids": target_qids,
+        }
     )
     for path in [CHECKPOINT, target_checkpoint]:
         if path.exists():
             path.unlink()
-    print(json.dumps({"source_qids": len(source_qids), "target_qids": len(target_qids), "new_records": len(records), "retained_records": len(merged_records), "output": str(OUTPUT)}, ensure_ascii=False))
+    print(json.dumps({"source_qids": len(source_qids), "target_qids": len(target_qids), "new_records": len(records), "retained_records": len(merged_records), "output": str(COMPRESSED_OUTPUT)}, ensure_ascii=False))
 
 
 if __name__ == "__main__":

@@ -9,10 +9,11 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
+from relation_state import load_relation_state
+
 
 ROOT = Path(__file__).parent
 WORKBOOK = ROOT / "inputs/entity_network_master.xlsx"
-RELATIONS = ROOT / "data/relation_wave_records.json"
 OUTPUT = ROOT / "data/pipeline_progress.json"
 
 
@@ -22,7 +23,7 @@ def rows(workbook, sheet_name: str) -> int:
 
 def main() -> None:
     workbook = load_workbook(WORKBOOK, read_only=True, data_only=True)
-    relation_state = json.loads(RELATIONS.read_text(encoding="utf-8")) if RELATIONS.exists() else {}
+    relation_state = load_relation_state()
     payload = {
         "source_offset": int(os.getenv("RELATION_SOURCE_OFFSET", "0")),
         "source_limit": int(os.getenv("RELATION_SOURCE_LIMIT", "0")),

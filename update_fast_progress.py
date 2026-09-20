@@ -19,11 +19,11 @@ from pathlib import Path
 from openpyxl import load_workbook
 
 from build_entity_network_layer import GCC, exclusion_reason
+from relation_state import load_relation_state
 
 
 ROOT = Path(__file__).parent
 WORKBOOK = ROOT / "inputs/entity_network_master.xlsx"
-RELATIONS = ROOT / "data/relation_wave_records.json"
 INDEX = ROOT / "data/fast_entity_index.json"
 PROGRESS = ROOT / "data/pipeline_progress.json"
 TARGET_UNIQUE = 100_000
@@ -116,7 +116,7 @@ def main() -> None:
     people_observations = int(state.get("people_observations", 0))
     relationship_observations = int(state.get("relationship_observations", 0))
 
-    relation_state = json.loads(RELATIONS.read_text(encoding="utf-8")) if RELATIONS.exists() else {}
+    relation_state = load_relation_state()
     new_observations = 0
     new_entities = 0
     for record in relation_state.get("records", []):
