@@ -23,9 +23,20 @@ on:
         required: true
         default: "300"
         type: string
+      auto_continue:
+        description: "Queue the next bounded relation batch after a successful run"
+        required: true
+        default: false
+        type: boolean
+      source_cycle:
+        description: "Bounded source-list pass number used by automatic continuation"
+        required: true
+        default: "0"
+        type: string
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   process:
@@ -49,6 +60,7 @@ jobs:
         env:
           RELATION_SOURCE_OFFSET: ${{ inputs.source_offset }}
           RELATION_SOURCE_LIMIT: ${{ inputs.source_limit }}
+          RELATION_SOURCE_CYCLE: ${{ inputs.source_cycle }}
         run: |
           echo "Processing source offset ${RELATION_SOURCE_OFFSET} with limit ${RELATION_SOURCE_LIMIT}"
           python extract_relation_wave.py
@@ -67,6 +79,13 @@ jobs:
           python materialize_scope_view.py
           python validate_public_build.py
 
+      - name: Record progress
+        env:
+          RELATION_SOURCE_OFFSET: ${{ inputs.source_offset }}
+          RELATION_SOURCE_LIMIT: ${{ inputs.source_limit }}
+          RELATION_SOURCE_CYCLE: ${{ inputs.source_cycle }}
+        run: python write_progress.py
+
       - name: Upload processed workbook
         uses: actions/upload-artifact@v4
         with:
@@ -79,6 +98,43 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add inputs/entity_network_master.xlsx data/relation_wave_records.json data/structured_candidate_records.json
+          git add inputs/entity_network_master.xlsx data/relation_wave_records.json data/structured_candidate_records.json data/pipeline_progress.json
           git diff --cached --quiet || git commit -m "chore: refresh processed public records"
           git push
+
+      - name: Queue next relation batch
+        if: ${{ inputs.auto_continue == true && inputs.expand_relations == true }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RELATION_SOURCE_OFFSET: ${{ inputs.source_offset }}
+          RELATION_SOURCE_LIMIT: ${{ inputs.source_limit }}
+          RELATION_SOURCE_CYCLE: ${{ inputs.source_cycle }}
+        run: |
+          unique=$(python -c 'import json; print(json.load(open("data/pipeline_progress.json"))["unique_entities"])')
+          available=$(python -c 'import json; print(json.load(open("data/pipeline_progress.json"))["all_source_qids"])')
+          offset=${RELATION_SOURCE_OFFSET}
+          limit=${RELATION_SOURCE_LIMIT}
+          cycle=${RELATION_SOURCE_CYCLE}
+          if [ "$unique" -ge 100000 ]; then
+            echo "Unique target reached: ${unique}"
+            exit 0
+          fi
+          next=$((offset + limit))
+          if [ "$next" -ge "$available" ]; then
+            next=0
+            cycle=$((cycle + 1))
+          fi
+          if [ "$cycle" -gt 5 ]; then
+            echo "Maximum automatic source-list cycles reached: ${cycle}"
+            exit 0
+          fi
+          echo "Queueing next relation batch: offset=${next}, limit=${limit}, cycle=${cycle}, available=${available}"
+          gh workflow run process-public-records.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            -f expand_relations=true \
+            -f harvest_candidates=false \
+            -f source_offset="$next" \
+            -f source_limit="$limit" \
+            -f auto_continue=true \
+            -f source_cycle="$cycle"
