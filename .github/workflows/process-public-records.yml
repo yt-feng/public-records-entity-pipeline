@@ -33,6 +33,16 @@ on:
         required: true
         default: "0"
         type: string
+      fast_mode:
+        description: "Update JSON entity state without rewriting the workbook on every wave"
+        required: true
+        default: true
+        type: boolean
+      materialize_workbook:
+        description: "Write the accumulated public JSON state back into the XLSX"
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -64,22 +74,72 @@ jobs:
         run: |
           echo "Processing source offset ${RELATION_SOURCE_OFFSET} with limit ${RELATION_SOURCE_LIMIT}"
           python extract_relation_wave.py
-          python append_relation_wave.py
+          if [ "${{ inputs.fast_mode }}" != "true" ]; then
+            python append_relation_wave.py
+          fi
 
       - name: Harvest structured candidates
-        if: ${{ inputs.harvest_candidates == true }}
+        if: ${{ inputs.harvest_candidates == true && inputs.fast_mode == false }}
         run: |
           python harvest_structured_candidates.py
           python harvest_royalty_candidates.py
           python append_structured_candidates.py
 
+      - name: Update fast unique progress
+        if: ${{ inputs.fast_mode == true && inputs.expand_relations == true }}
+        env:
+          RELATION_SOURCE_OFFSET: ${{ inputs.source_offset }}
+          RELATION_SOURCE_LIMIT: ${{ inputs.source_limit }}
+          RELATION_SOURCE_CYCLE: ${{ inputs.source_cycle }}
+        run: python update_fast_progress.py
+
       - name: Rebuild unique layers
+        if: ${{ inputs.fast_mode == false }}
         run: |
           python build_entity_network_layer.py
           python materialize_scope_view.py
           python validate_public_build.py
 
+      - name: Materialize workbook at target
+        if: ${{ inputs.fast_mode == true && inputs.materialize_workbook == true }}
+        id: requested_materialization
+        run: |
+          python append_relation_wave.py
+          python build_entity_network_layer.py
+          python materialize_scope_view.py
+          python validate_public_build.py
+
+      - name: Materialize workbook when target is reached
+        if: ${{ inputs.fast_mode == true && inputs.expand_relations == true && inputs.materialize_workbook == false }}
+        id: target_materialization
+        run: |
+          unique=$(python -c 'import json; print(json.load(open("data/pipeline_progress.json"))["unique_entities"])')
+          if [ "$unique" -ge 100000 ]; then
+            echo "Fast unique target reached: ${unique}; materializing workbook"
+            python append_relation_wave.py
+            python build_entity_network_layer.py
+            python materialize_scope_view.py
+            python validate_public_build.py
+            RELATION_SOURCE_OFFSET=${{ inputs.source_offset }} \
+            RELATION_SOURCE_LIMIT=${{ inputs.source_limit }} \
+            RELATION_SOURCE_CYCLE=${{ inputs.source_cycle }} \
+              python write_progress.py
+            echo "materialized=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Fast unique target not reached: ${unique}"
+            echo "materialized=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Record progress
+        if: ${{ inputs.fast_mode == false }}
+        env:
+          RELATION_SOURCE_OFFSET: ${{ inputs.source_offset }}
+          RELATION_SOURCE_LIMIT: ${{ inputs.source_limit }}
+          RELATION_SOURCE_CYCLE: ${{ inputs.source_cycle }}
+        run: python write_progress.py
+
+      - name: Record materialized progress
+        if: ${{ inputs.fast_mode == true && inputs.materialize_workbook == true }}
         env:
           RELATION_SOURCE_OFFSET: ${{ inputs.source_offset }}
           RELATION_SOURCE_LIMIT: ${{ inputs.source_limit }}
@@ -87,6 +147,7 @@ jobs:
         run: python write_progress.py
 
       - name: Upload processed workbook
+        if: ${{ inputs.fast_mode == false || inputs.materialize_workbook == true || steps.target_materialization.outputs.materialized == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: entity-network-workbook
@@ -98,7 +159,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add inputs/entity_network_master.xlsx data/relation_wave_records.json data/structured_candidate_records.json data/pipeline_progress.json
+          git add inputs/entity_network_master.xlsx data/relation_wave_records.json data/structured_candidate_records.json data/pipeline_progress.json data/fast_entity_index.json
           git diff --cached --quiet || git commit -m "chore: refresh processed public records"
           git push
 
@@ -117,7 +178,7 @@ jobs:
           limit=${RELATION_SOURCE_LIMIT}
           cycle=${RELATION_SOURCE_CYCLE}
           if [ "$unique" -ge 100000 ]; then
-            echo "Unique target reached: ${unique}"
+            echo "Unique target reached: ${unique}; no further batch queued"
             exit 0
           fi
           next=$((offset + limit))
@@ -137,4 +198,6 @@ jobs:
             -f source_offset="$next" \
             -f source_limit="$limit" \
             -f auto_continue=true \
-            -f source_cycle="$cycle"
+            -f source_cycle="$cycle" \
+            -f fast_mode=true \
+            -f materialize_workbook=false

@@ -18,6 +18,7 @@ ROOT = Path(__file__).parent
 WORKBOOK = ROOT / "inputs/entity_network_master.xlsx"
 OUTPUT = ROOT / "data/relation_wave_records.json"
 CHECKPOINT = ROOT / "data/relation_wave_checkpoint.json"
+FAST_INDEX = ROOT / "data/fast_entity_index.json"
 GCC = {"Saudi Arabia", "Qatar", "United Arab Emirates", "Kuwait", "Bahrain", "Oman"}
 SOURCE_ID = "SRC-068"
 
@@ -30,15 +31,49 @@ def load_records(path: Path) -> list[dict]:
     return json.loads(path.read_text(encoding="utf-8"))["records"] if path.exists() else []
 
 
-def main() -> None:
+def load_contexts() -> dict[str, set[tuple[str, str]]]:
+    """Read source contexts from the compact fast index when available.
+
+    Fast mode intentionally leaves the reader-facing workbook unchanged between
+    waves.  The index therefore becomes the source-QID frontier after its first
+    initialization; the workbook remains the fallback for legacy/manual runs.
+    """
+    if FAST_INDEX.exists():
+        state = json.loads(FAST_INDEX.read_text(encoding="utf-8"))
+        contexts: dict[str, set[tuple[str, str]]] = {}
+        entities = state.get("entities", {})
+        for key, entity_id in state.get("key_to_entity", {}).items():
+            if not key.startswith("QID:"):
+                continue
+            qid = key[4:]
+            entity = entities.get(entity_id, {})
+            pairs = entity.get("contexts", [])
+            if not pairs:
+                pairs = [[country, house] for country in entity.get("countries", []) for house in (entity.get("houses", []) or [""])]
+            for pair in pairs:
+                if not pair:
+                    continue
+                country = str(pair[0])
+                if country not in GCC:
+                    continue
+                contexts.setdefault(qid, set()).add((country, str(pair[1] if len(pair) > 1 else "")))
+        if contexts:
+            return contexts
+
     wb = load_workbook(WORKBOOK, read_only=True, data_only=True)
-    contexts: dict[str, set[tuple[str, str]]] = {}
+    contexts = {}
     for row in wb["People"].iter_rows(min_row=2, values_only=True):
         if row[1] not in GCC:
             continue
         match = re.search(r"wikidata\.org/(?:wiki/|entity/)(Q\d+)", str(row[14] or ""))
         if match:
             contexts.setdefault(match.group(1), set()).add((row[1], row[2]))
+    wb.close()
+    return contexts
+
+
+def main() -> None:
+    contexts = load_contexts()
     all_source_qids = sorted(contexts)
     source_offset = max(int(os.getenv("RELATION_SOURCE_OFFSET", "0")), 0)
     source_limit = max(int(os.getenv("RELATION_SOURCE_LIMIT", "300")), 0)
