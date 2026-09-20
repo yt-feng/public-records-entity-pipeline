@@ -1,0 +1,12 @@
+{
+  "source_offset": 13200,
+  "source_limit": 600,
+  "source_cycle": 0,
+  "people_observations": 157641,
+  "relationship_observations": 121089,
+  "unique_entities": 54049,
+  "strict_scope_entities": 40356,
+  "all_source_qids": 17411,
+  "retained_relation_records": 55416,
+  "updated_at": "2026-09-20T11:42:38.792787+00:00"
+}
