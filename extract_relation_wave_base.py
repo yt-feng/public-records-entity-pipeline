@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import random
 import re
 import time
 import urllib.parse
@@ -30,12 +31,19 @@ def batches(items: list[str], size: int = 50):
 def api(ids: list[str]) -> dict:
     query = urllib.parse.urlencode({"action": "wbgetentities", "ids": "|".join(ids), "props": "claims|labels", "languages": "en", "format": "json"})
     req = urllib.request.Request(f"https://www.wikidata.org/w/api.php?{query}", headers={"User-Agent": "Public-Records-Research/0.4"})
-    for attempt in range(5):
+    for attempt in range(9):
         try:
             with urllib.request.urlopen(req, timeout=60) as response: return json.load(response)
         except HTTPError as exc:
-            if exc.code != 429 or attempt == 4: raise
-            time.sleep(15 * (attempt + 1))
+            if exc.code != 429 or attempt == 8: raise
+            retry_after = exc.headers.get("Retry-After") if exc.headers else None
+            try:
+                delay = float(retry_after) if retry_after else 15 * (attempt + 1)
+            except (TypeError, ValueError):
+                delay = 15 * (attempt + 1)
+            # Spread concurrent retries so a burst does not immediately
+            # recreate the same Wikidata rate-limit window.
+            time.sleep(min(max(delay, 5.0) + random.uniform(0, 5), 180.0))
     raise RuntimeError("unreachable")
 
 

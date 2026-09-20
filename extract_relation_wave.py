@@ -22,7 +22,7 @@ CHECKPOINT = ROOT / "data/relation_wave_checkpoint.json"
 FAST_INDEX = ROOT / "data/fast_entity_index.json"
 GCC = {"Saudi Arabia", "Qatar", "United Arab Emirates", "Kuwait", "Bahrain", "Oman"}
 SOURCE_ID = "SRC-068"
-API_WORKERS = max(int(os.getenv("RELATION_API_WORKERS", "4")), 1)
+API_WORKERS = max(int(os.getenv("RELATION_API_WORKERS", "3")), 1)
 
 
 def stable(key: tuple[str, str, str, str, str]) -> str:
