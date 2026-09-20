@@ -7,6 +7,7 @@ import json
 import os
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from openpyxl import load_workbook
@@ -21,6 +22,7 @@ CHECKPOINT = ROOT / "data/relation_wave_checkpoint.json"
 FAST_INDEX = ROOT / "data/fast_entity_index.json"
 GCC = {"Saudi Arabia", "Qatar", "United Arab Emirates", "Kuwait", "Bahrain", "Oman"}
 SOURCE_ID = "SRC-068"
+API_WORKERS = max(int(os.getenv("RELATION_API_WORKERS", "4")), 1)
 
 
 def stable(key: tuple[str, str, str, str, str]) -> str:
@@ -72,6 +74,39 @@ def load_contexts() -> dict[str, set[tuple[str, str]]]:
     return contexts
 
 
+def fetch_batches(
+    qids: list[str],
+    checkpoint: Path,
+    state_key: str,
+) -> dict[str, dict]:
+    """Fetch QID batches with bounded concurrency and resumable checkpoints."""
+    if checkpoint.exists():
+        state = json.loads(checkpoint.read_text(encoding="utf-8"))
+        entities = state.get(state_key, {})
+        done = set(state.get("done", []))
+    else:
+        entities, done = {}, set()
+
+    pending = [qid for qid in qids if qid not in done]
+    batches_to_fetch = list(base.batches(pending))
+    if not batches_to_fetch:
+        return entities
+
+    workers = min(API_WORKERS, len(batches_to_fetch))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {executor.submit(base.api, batch): batch for batch in batches_to_fetch}
+        for future in as_completed(futures):
+            batch = futures[future]
+            entities.update(future.result().get("entities", {}))
+            done.update(batch)
+            checkpoint.write_text(
+                json.dumps({state_key: entities, "done": sorted(done)}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            time.sleep(0.2)
+    return entities
+
+
 def main() -> None:
     contexts = load_contexts()
     all_source_qids = sorted(contexts)
@@ -88,36 +123,12 @@ def main() -> None:
         for record in previous
     }
 
-    if CHECKPOINT.exists():
-        state = json.loads(CHECKPOINT.read_text(encoding="utf-8"))
-        entities = state.get("entities", {})
-        done = set(state.get("done", []))
-    else:
-        entities, done = {}, set()
-    for batch in base.batches([qid for qid in source_qids if qid not in done]):
-        entities.update(base.api(batch).get("entities", {}))
-        done.update(batch)
-        CHECKPOINT.write_text(
-            json.dumps({"entities": entities, "done": sorted(done)}, ensure_ascii=False), encoding="utf-8"
-        )
-        time.sleep(0.2)
+    entities = fetch_batches(source_qids, CHECKPOINT, "entities")
 
     target_qids = sorted({qid for entity in entities.values() for qid, _ in base.targets(entity)})
     target_entities: dict[str, dict] = {}
     target_checkpoint = ROOT / "data/relation_wave_target_checkpoint.json"
-    if target_checkpoint.exists():
-        state = json.loads(target_checkpoint.read_text(encoding="utf-8"))
-        target_entities = state.get("entities", {})
-        target_done = set(state.get("done", []))
-    else:
-        target_done = set()
-    for batch in base.batches([qid for qid in target_qids if qid not in target_done]):
-        target_entities.update(base.api(batch).get("entities", {}))
-        target_done.update(batch)
-        target_checkpoint.write_text(
-            json.dumps({"entities": target_entities, "done": sorted(target_done)}, ensure_ascii=False), encoding="utf-8"
-        )
-        time.sleep(0.2)
+    target_entities = fetch_batches(target_qids, target_checkpoint, "entities")
 
     records = []
     seen = set()
