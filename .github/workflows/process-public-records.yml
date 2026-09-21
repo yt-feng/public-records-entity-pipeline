@@ -102,6 +102,7 @@ jobs:
         run: |
           python materialize_streaming_workbook.py
           python validate_public_build.py
+          python export_public_records.py
 
       - name: Materialize workbook at target
         if: ${{ inputs.fast_mode == true && inputs.materialize_workbook == true }}
@@ -109,6 +110,7 @@ jobs:
         run: |
           python materialize_streaming_workbook.py
           python validate_public_build.py
+          python export_public_records.py
 
       - name: Materialize workbook when target is reached
         if: ${{ inputs.fast_mode == true && inputs.expand_relations == true && inputs.materialize_workbook == false }}
@@ -119,6 +121,7 @@ jobs:
             echo "Fast unique target reached: ${unique}; materializing workbook"
             python materialize_streaming_workbook.py
             python validate_public_build.py
+            python export_public_records.py
             RELATION_SOURCE_OFFSET=${{ inputs.source_offset }} \
             RELATION_SOURCE_LIMIT=${{ inputs.source_limit }} \
             RELATION_SOURCE_CYCLE=${{ inputs.source_cycle }} \
@@ -150,7 +153,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: entity-network-workbook
-          path: inputs/entity_network_master.xlsx
+          path: |
+            inputs/entity_network_master.xlsx
+            data/public_unique_people.csv.gz
+            data/public_gcc_unique_people.csv.gz
+            data/public_people_observations.csv.gz
+            data/public_relationships.csv.gz
           if-no-files-found: error
           retention-days: 14
 
@@ -158,7 +166,11 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add inputs/entity_network_master.xlsx data/structured_candidate_records.json data/pipeline_progress.json data/fast_entity_index.json
+          # The reader-facing XLSX is kept as an Action artifact because the
+          # generated file can exceed GitHub's 100 MB repository-file limit.
+          # Durable compressed public extracts and processing checkpoints stay
+          # in the public repository.
+          git add data/structured_candidate_records.json data/pipeline_progress.json data/fast_entity_index.json
           # Stage the compressed state and its intentional legacy-file removal
           # without requiring the absent legacy JSON path to exist.
           git add -A data
