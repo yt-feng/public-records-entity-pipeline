@@ -51,7 +51,11 @@ permissions:
 jobs:
   process:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    # XLSX materialization rewrites the accumulated public workbook several
+    # times after the fast JSON target is reached. Keep the work on the public
+    # runner instead of falling back to local processing, and allow enough time
+    # for the large file to finish and pass the full public-build scan.
+    timeout-minutes: 360
     steps:
       - name: Check out current state
         uses: actions/checkout@v4
