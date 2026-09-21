@@ -1,13 +1,13 @@
 {
-  "source_offset": 18300,
-  "source_limit": 300,
+  "source_offset": 18600,
+  "source_limit": 50,
   "source_cycle": 1,
-  "people_observations": 413109,
-  "relationship_observations": 376557,
+  "people_observations": 413139,
+  "relationship_observations": 376587,
   "unique_entities": 99987,
   "strict_scope_entities": 86294,
-  "all_source_qids": 63658,
-  "retained_relation_records": 310884,
+  "all_source_qids": 63746,
+  "retained_relation_records": 310914,
   "unique_gap_to_100k": 13,
-  "updated_at": "2026-09-21T01:18:17.703925+00:00"
+  "updated_at": "2026-09-21T14:57:35.446403+00:00"
 }
