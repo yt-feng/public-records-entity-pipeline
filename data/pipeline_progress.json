@@ -6,8 +6,8 @@
   "relationship_observations": 376631,
   "unique_entities": 99998,
   "strict_scope_entities": 86305,
-  "all_source_qids": 63755,
+  "all_source_qids": 63757,
   "retained_relation_records": 310958,
   "unique_gap_to_100k": 2,
-  "updated_at": "2026-09-21T15:00:16.387000+00:00"
+  "updated_at": "2026-09-21T17:03:00.432600+00:00"
 }
