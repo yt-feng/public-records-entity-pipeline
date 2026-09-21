@@ -100,17 +100,14 @@ jobs:
       - name: Rebuild unique layers
         if: ${{ inputs.fast_mode == false }}
         run: |
-          python build_entity_network_layer.py
-          python materialize_scope_view.py
+          python materialize_streaming_workbook.py
           python validate_public_build.py
 
       - name: Materialize workbook at target
         if: ${{ inputs.fast_mode == true && inputs.materialize_workbook == true }}
         id: requested_materialization
         run: |
-          python append_relation_wave.py
-          python build_entity_network_layer.py
-          python materialize_scope_view.py
+          python materialize_streaming_workbook.py
           python validate_public_build.py
 
       - name: Materialize workbook when target is reached
@@ -120,9 +117,7 @@ jobs:
           unique=$(python -c 'import json; print(json.load(open("data/pipeline_progress.json"))["unique_entities"])')
           if [ "$unique" -ge 100000 ]; then
             echo "Fast unique target reached: ${unique}; materializing workbook"
-            python append_relation_wave.py
-            python build_entity_network_layer.py
-            python materialize_scope_view.py
+            python materialize_streaming_workbook.py
             python validate_public_build.py
             RELATION_SOURCE_OFFSET=${{ inputs.source_offset }} \
             RELATION_SOURCE_LIMIT=${{ inputs.source_limit }} \

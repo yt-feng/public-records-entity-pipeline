@@ -2,7 +2,7 @@
 
 This repository contains a reproducible pipeline for normalizing public-record entities, explicit relationship claims, and conservative deduplication layers.
 
-The workflow runs on GitHub Actions so the large workbook transformation does not consume a local workstation. It can:
+The workflow runs on GitHub Actions so the large workbook transformation does not consume a local workstation. Final XLSX materialization uses a constant-memory streaming writer on the runner, so the public workbook is rebuilt without requiring a local desktop process. It can:
 
 - expand structured relationship edges from the current entity set;
 - append only unseen observations;
