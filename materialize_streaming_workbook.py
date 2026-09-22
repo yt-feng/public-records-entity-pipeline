@@ -334,6 +334,15 @@ def main() -> None:
         name = str(record.get("name") or record.get("related_name") or "").strip()
         url = str(record.get("page_url") or "").strip()
         house = str(record.get("house") or "").strip()
+        # Preserve every unseen GCC observation in the raw People and
+        # Relationships sheets.  Scope/exclusion decisions belong in the
+        # conservative unique layer and Excluded_Candidates, not in the raw
+        # evidence ledger.
+        if record_id not in source_people_ids:
+            new_people_records.append(record)
+        relation_id = f"WDC5-REL-{record_id}"
+        if relation_id not in source_relationship_ids:
+            new_relationship_records.append(relationship_row(record))
         excluded = qid in excluded_qids or bool(exclusion_reason([name], [url], [country, house]))
         if excluded:
             if record_id not in excluded_observation_ids:
@@ -366,12 +375,6 @@ def main() -> None:
         if record_id not in indexed_observations:
             apply_record(metas[entity_id], record, key or record_id)
             indexed_observations.add(record_id)
-        if record_id not in source_people_ids:
-            new_people_records.append(record)
-        relation_id = f"WDC5-REL-{record_id}"
-        if relation_id not in source_relationship_ids:
-            new_relationship_records.append(relationship_row(record))
-
     unique_rows = [meta_to_row(meta) for meta in metas.values()]
     unique_rows.sort(key=lambda row: (str(row[3]), str(row[4]), str(row[1]), str(row[0])))
     gcc_rows = [
