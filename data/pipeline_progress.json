@@ -2,11 +2,11 @@
   "source_offset": 18800,
   "source_limit": 100,
   "source_cycle": 1,
-  "people_observations": 410823,
-  "relationship_observations": 374271,
+  "people_observations": 413226,
+  "relationship_observations": 376674,
   "unique_entities": 100010,
   "strict_scope_entities": 86317,
   "all_source_qids": 63757,
   "retained_relation_records": 311001,
-  "updated_at": "2026-09-22T00:16:34.457369+00:00"
+  "updated_at": "2026-09-22T01:41:09.490351+00:00"
 }
